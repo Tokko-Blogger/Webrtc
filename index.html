@@ -1,0 +1,264 @@
+
+    
+    <link href='https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.0.3/tailwind.min.css' rel='stylesheet'/>
+
+    <div id='vanilla-root'></div>
+    <div id='media-container'></div>
+
+     <script>/*<![CDATA[*/
+      function appf() {
+        const root = document.querySelector('#vanilla-root');
+        const zuckHouse = RTChouse({
+          api: location.host 
+        });
+
+        let room = undefined;
+        let user = undefined;
+        let muted = false;
+        let speakers = [];
+
+        const setRoot = (el) => {
+          root.innerHTML = '';
+          root.appendChild(el);
+        };
+
+        const focusInput = () => {
+          const input = root.querySelector('form input');
+
+          if (input) {
+            input.focus();
+          }
+        };
+
+        const getAvatar = (value) => {
+          return 'https://avatars.dicebear.com/api/micah/' + value + '.svg';
+        };
+
+        const createMedia = (id, type, src) => {
+          let mediaContainer = document.querySelector('#media-container');
+
+          if (!mediaContainer) {
+            mediaContainer = document.createElement('div');
+            mediaContainer.id = 'media-container';
+            mediaContainer.className = 'hidden';
+            document.body.appendChild(mediaContainer);
+          }
+
+          if (!document.querySelector(`#${id}`)) {
+            let newVid = document.createElement(type || 'media');
+
+            newVid.srcObject = src;
+            newVid.id = id;
+            newVid.playsinline = false;
+            newVid.autoplay = true;
+            newVid.className = 'vid';
+
+            if (id === 'user') {
+              newVid.muted = true;
+            }
+
+            mediaContainer.appendChild(newVid);
+          }
+        };
+
+        const removeMedia = (id) => {
+          const mediaEl = document.querySelector(`#${id}`);
+
+          if (mediaEl) {
+            const tracks = mediaEl.srcObject.getTracks();
+
+            tracks.forEach(function (track) {
+              track.stop();
+            });
+
+            mediaEl.srcObject = null;
+            mediaEl.parentNode.removeChild(mediaEl);
+          }
+        };
+
+        const updateRoom = () => {
+          setRoot(
+            zuckHouse.components.Panel({
+              children: [
+                zuckHouse.components.Room({
+                  title: room,
+                  speakers: speakers,
+                  muted: muted,
+                  onDisconnect: zuckHouse.disconnect,
+                  onAction: (action) => {
+                    if (action === 'add') {
+                      window.prompt(
+                        'Share this link with someone',
+                        location.href
+                      );
+                    } else {
+                      zuckHouse.action(action);
+                    }
+                  },
+                }),
+              ],
+            })
+          );
+        };
+
+        const startRoom = () => {
+          document.location.hash = room;
+
+          if (room && room.length > 0) {
+            zuckHouse.room.set({
+              name: room,
+            });
+
+            zuckHouse.init(() => {
+              updateRoom();
+            });
+          }
+        };
+
+        const roomChooser = () => {
+          if (document.location.hash.length > 1) {
+            room = document.location.hash.slice(1);
+
+            nameChooser();
+
+            return;
+          }
+
+          setRoot(
+            zuckHouse.components.Panel({
+              children: [
+                zuckHouse.components.Form({
+                  title: 'Enter room name',
+                  placeholderText: 'room name',
+                  actionText: 'continue',
+                  onSubmit(event) {
+                    event.preventDefault();
+
+                    const form = event.target;
+
+                    let value = form.querySelector('input').value;
+                    if (value.length > 32) {
+                      value = value.slice(0, 32);
+                    }
+
+                    room = value;
+                    nameChooser();
+                  },
+                }),
+              ],
+            })
+          );
+
+          focusInput();
+        };
+
+        const nameChooser = () => {
+          setRoot(
+            zuckHouse.components.Panel({
+              children: [
+                zuckHouse.components.Form({
+                  title: 'Enter your name',
+                  placeholderText: 'your name',
+                  actionText: 'enter',
+                  onSubmit(event) {
+                    event.preventDefault();
+
+                    const form = event.target;
+
+                    let value = form.querySelector('input').value;
+
+                    if (value.length > 0) {
+                      zuckHouse.user.set({
+                        name: value,
+                      });
+
+                      user = value;
+
+                      startRoom();
+                    }
+                  },
+                }),
+              ],
+            })
+          );
+
+          focusInput();
+        };
+
+        roomChooser();
+
+        zuckHouse.on('action', function (event) {
+          const action = event.type;
+          const { value } = event.detail;
+
+          if (action === 'mute') {
+            muted = !value;
+          }
+
+          updateRoom();
+        });
+
+        zuckHouse.on('user', function (event) {
+          const type = event.type;
+          const user = event.detail;
+
+          if (type === 'update') {
+            if (user.stream) {
+              createMedia('user', user.streamType, user.stream);
+            } else {
+              removeMedia('user');
+            }
+          }
+        });
+
+        zuckHouse.on('media', function (event) {
+          const type = event.type;
+          const stream = event.detail;
+
+          if (type === 'add') {
+            createMedia(
+              `stream-${stream.id}`,
+              stream.streamType,
+              stream.stream
+            );
+          } else if (type === 'remove') {
+            removeMedia(`stream-${stream.id}`);
+          }
+        });
+
+        zuckHouse.on('disconnect', function () {
+          room = undefined;
+          user = undefined;
+          muted = false;
+          speakers = [];
+
+          roomChooser();
+        });
+
+        zuckHouse.on('room:member', function (event) {
+          const member = event.detail;
+
+          if (event.type === 'add') {
+            member.image = getAvatar(member.name);
+
+            speakers.push(member);
+          } else if (event.type === 'remove') {
+            speakers = speakers.filter((speaker) => speaker.id !== member.id);
+          } else if (event.type === 'update') {
+            speakers = speakers.map((speaker) => {
+              return speaker.id === member.id
+                ? { ...speaker, ...member }
+                : speaker;
+            });
+          }
+
+          updateRoom();
+        });
+      }
+
+      window.onload = () => {
+        appf();
+      };
+     /*]]>*/</script>
+  <script src='https://demos.ramon.codes/webrtc-house.ts/scripts/app.js'></script>    
+    
